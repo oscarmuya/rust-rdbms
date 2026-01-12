@@ -17,7 +17,7 @@ pub enum Command {
         table_name: String,
         // Later we will add:
         // filters: Vec<Expression>,
-        // join: Option<JoinClause>,
+        join: Option<JoinClause>,
     },
 }
 

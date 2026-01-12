@@ -1,8 +1,9 @@
 use crate::catalog::schema::{Column, DataType};
-use crate::sql::Command;
+use crate::sql::{Command, JoinClause};
 use crate::storage::record::{Field, Row};
 use sqlparser::ast::{
-    ColumnDef, DataType as SQLDataType, Expr, SelectItem, SetExpr, Statement, TableFactor,
+    BinaryOperator, ColumnDef, DataType as SQLDataType, Expr, JoinConstraint, JoinOperator,
+    SelectItem, SetExpr, Statement, TableFactor,
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
@@ -54,37 +55,50 @@ pub fn parse_sql(sql: &str) -> Result<Vec<Command>, String> {
                 }
             }
             Statement::Query(query) => {
-                let (_, table) = match query.body.as_ref() {
-                    SetExpr::Select(select) => {
-                        let proj: Vec<String> = select
-                            .projection
-                            .iter()
-                            .filter_map(|item| match item {
-                                SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
-                                    Some(ident.value.clone())
-                                }
-                                SelectItem::Wildcard(_) => Some("*".to_string()),
-                                _ => None,
-                            })
-                            .collect();
+                if let SetExpr::Select(select) = *query.body {
+                    // 1. Get the Primary (Left) Table
+                    let first_from = select.from.first().ok_or("Missing FROM clause")?;
+                    let left_table = match &first_from.relation {
+                        TableFactor::Table { name, .. } => name.to_string(),
+                        _ => return Err("Unsupported table reference".to_string()),
+                    };
 
-                        let tbl = if let Some(table_with_joins) = select.from.first() {
-                            if let TableFactor::Table { name, .. } = &table_with_joins.relation {
-                                name.to_string()
-                            } else {
-                                return Err("Unsupported table reference".to_string());
-                            }
-                        } else {
-                            return Err("Missing table in FROM clause".to_string());
+                    // 2. Check for JOINs
+                    let mut join_info = None;
+                    if let Some(join) = first_from.joins.first() {
+                        let right_table = match &join.relation {
+                            TableFactor::Table { name, .. } => name.to_string(),
+                            _ => return Err("Unsupported JOIN table".to_string()),
                         };
 
-                        (proj, tbl)
-                    }
-                    _ => return Err("Unsupported query format".to_string()),
-                };
+                        // 3. Extract the ON condition (e.g., tableA.id = tableB.user_id)
+                        if let JoinOperator::Inner(JoinConstraint::On(Expr::BinaryOp {
+                            left,
+                            op,
+                            right,
+                        })) = &join.join_operator
+                        {
+                            if let BinaryOperator::Eq = op {
+                                // Extract column names from expressions like 'users.id'
+                                let left_column = extract_column_name(left)?;
+                                let right_column = extract_column_name(right)?;
 
-                commands.push(Command::Select { table_name: table });
+                                join_info = Some(JoinClause {
+                                    right_table,
+                                    left_column,
+                                    right_column,
+                                });
+                            }
+                        }
+                    }
+
+                    commands.push(Command::Select {
+                        table_name: left_table,
+                        join: join_info,
+                    });
+                }
             }
+
             _ => return Err("Unsupported SQL statement".to_string()),
         }
     }
@@ -131,5 +145,16 @@ fn convert_expr_to_field(expr: &Expr) -> Result<Field, String> {
         Expr::Value(sqlparser::ast::Value::SingleQuotedString(s)) => Ok(Field::Text(s.clone())),
         Expr::Value(sqlparser::ast::Value::Boolean(b)) => Ok(Field::Boolean(*b)),
         _ => Err(format!("Unsupported expression type: {:?}", expr)),
+    }
+}
+
+fn extract_column_name(expr: &Expr) -> Result<String, String> {
+    match expr {
+        Expr::Identifier(ident) => Ok(ident.value.clone()),
+        Expr::CompoundIdentifier(parts) => {
+            // We just take the last part (the column name)
+            Ok(parts.last().unwrap().value.clone())
+        }
+        _ => Err(format!("Expected column name, found {:?}", expr)),
     }
 }

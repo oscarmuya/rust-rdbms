@@ -17,6 +17,13 @@ pub enum Command {
         table_name: String,
         // Later we will add:
         // filters: Vec<Expression>,
-        // join: Option<JoinClause>
+        // join: Option<JoinClause>,
     },
+}
+
+#[derive(Debug)]
+pub struct JoinClause {
+    pub left_column: String,
+    pub right_table: String,
+    pub right_column: String,
 }

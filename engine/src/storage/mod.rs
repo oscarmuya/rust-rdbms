@@ -18,18 +18,40 @@ impl Table {
         let mut target_page_index = None;
         let mut target_slot_index = None;
         let mut page = Page::new();
+        let pk_col_idx = self.schema.columns.iter().position(|c| c.is_primary);
+        let max_slots = (PAGE_SIZE - HEADER_SIZE) / self.schema.row_size();
+
+        let pk_value = if let Some(col_idx) = pk_col_idx {
+            // Convert the field value to a string to use as the index key
+            Some(match &row.fields[col_idx] {
+                Field::Integer(v) => v.to_string(),
+                Field::Text(v) => v.clone(),
+                Field::Boolean(v) => v.to_string(),
+            })
+        } else {
+            None
+        };
+
+        if let Some(pk_value) = &pk_value {
+            if self.index.map.contains_key(pk_value) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "Primary Key Violation",
+                ));
+            }
+        }
 
         // 1. Find a page and a slot.
         // Iterate through existing pages.
         'page_loop: for p_idx in 0..self.pager.num_pages() {
             let p = self.pager.read_page(p_idx)?;
-            let max_slots = (PAGE_SIZE - HEADER_SIZE) / self.schema.row_size();
 
             for slot_index in 0..max_slots {
                 if !p.is_slot_full(slot_index) {
                     target_page_index = Some(p_idx);
                     target_slot_index = Some(slot_index);
                     page = p;
+
                     break 'page_loop;
                 }
             }
@@ -51,6 +73,9 @@ impl Table {
         page.data[offset..offset + self.schema.row_size()].copy_from_slice(&serialized_row);
 
         self.pager.write_page(p_idx, &page).unwrap();
+        if let Some(pk_value) = pk_value {
+            let _ = self.index.insert(pk_value, p_idx, s_idx);
+        }
 
         Ok(())
     }

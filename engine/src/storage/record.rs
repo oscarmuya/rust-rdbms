@@ -7,7 +7,7 @@ pub enum Field {
     Text(String),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Row {
     pub fields: Vec<Field>,
 }
@@ -77,5 +77,48 @@ impl Row {
         }
 
         Row { fields }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::schema::{Column, DataType, Schema};
+
+    #[test]
+    fn test_row_serialization() {
+        let schema = Schema {
+            table_name: "test".to_string(),
+            columns: vec![
+                Column {
+                    name: "id".to_string(),
+                    data_type: DataType::Integer,
+                    is_primary: true,
+                },
+                Column {
+                    name: "active".to_string(),
+                    data_type: DataType::Boolean,
+                    is_primary: false,
+                },
+                Column {
+                    name: "name".to_string(),
+                    data_type: DataType::Text(20),
+                    is_primary: false,
+                },
+            ],
+        };
+
+        let row = Row {
+            fields: vec![
+                Field::Integer(123),
+                Field::Boolean(true),
+                Field::Text("Hello".to_string()),
+            ],
+        };
+
+        let bytes = row.serialize(&schema);
+        let deserialized = Row::deserialize(&bytes, &schema);
+
+        assert_eq!(row, deserialized);
     }
 }

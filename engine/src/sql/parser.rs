@@ -3,7 +3,7 @@ use crate::sql::{Command, JoinClause};
 use crate::storage::record::{Field, Row};
 use sqlparser::ast::{
     BinaryOperator, ColumnDef, DataType as SQLDataType, Expr, JoinConstraint, JoinOperator,
-    SelectItem, SetExpr, Statement, TableFactor,
+    SetExpr, Statement, TableFactor,
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;

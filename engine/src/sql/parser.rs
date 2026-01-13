@@ -30,6 +30,31 @@ pub fn parse_sql(sql: &str) -> Result<Vec<Command>, String> {
                 });
             }
 
+            Statement::Delete {
+                selection, from, ..
+            } => {
+                for table in from {
+                    if let Some(selection) = &selection {
+                        let filter = parse_selection(&selection).unwrap();
+                        commands.push(Command::Delete {
+                            table_name: table.to_string(),
+                            filter: filter,
+                        });
+                    }
+                }
+            }
+
+            Statement::Drop {
+                object_type, names, ..
+            } => {
+                if matches!(object_type, sqlparser::ast::ObjectType::Table) {
+                    let table_name = names.first().unwrap().to_string();
+                    commands.push(Command::DropTable { table_name });
+                } else {
+                    return Err("Only DROP TABLE is supported".to_string());
+                }
+            }
+
             Statement::Update {
                 table,
                 assignments,
@@ -47,29 +72,9 @@ pub fn parse_sql(sql: &str) -> Result<Vec<Command>, String> {
                 }
 
                 // 2. Map WHERE clause
-                let filter = if let Some(selection) = selection {
-                    if let Expr::BinaryOp { left, op, right } = selection {
-                        let col_name = extract_column_name(&left)?;
-                        let op_type = match op {
-                            BinaryOperator::Eq => Operator::Eq,
-                            BinaryOperator::NotEq => Operator::NotEq,
-                            BinaryOperator::Gt => Operator::GreaterThan,
-                            BinaryOperator::Lt => Operator::LessThan,
-                            _ => return Err("Unsupported operator".to_string()),
-                        };
-                        // Turn the 'right' side into a Field
-                        let val = convert_expr_to_field(&right)?;
-
-                        Some(Filter {
-                            column_name: col_name,
-                            operator: op_type,
-                            value: val,
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
+                let filter: Option<Filter> = match &selection {
+                    Some(sel) => parse_selection(sel)?,
+                    None => None,
                 };
 
                 commands.push(Command::Update {
@@ -141,29 +146,9 @@ pub fn parse_sql(sql: &str) -> Result<Vec<Command>, String> {
                         }
                     }
 
-                    let filter = if let Some(selection) = select.selection {
-                        if let Expr::BinaryOp { left, op, right } = selection {
-                            let col_name = extract_column_name(&left)?;
-                            let op_type = match op {
-                                BinaryOperator::Eq => Operator::Eq,
-                                BinaryOperator::NotEq => Operator::NotEq,
-                                BinaryOperator::Gt => Operator::GreaterThan,
-                                BinaryOperator::Lt => Operator::LessThan,
-                                _ => return Err("Unsupported operator".to_string()),
-                            };
-                            // Turn the 'right' side into a Field
-                            let val = convert_expr_to_field(&right)?;
-
-                            Some(Filter {
-                                column_name: col_name,
-                                operator: op_type,
-                                value: val,
-                            })
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
+                    let filter: Option<Filter> = match &select.selection {
+                        Some(sel) => parse_selection(sel)?,
+                        None => None,
                     };
 
                     commands.push(Command::Select {
@@ -179,6 +164,32 @@ pub fn parse_sql(sql: &str) -> Result<Vec<Command>, String> {
     }
 
     Ok(commands)
+}
+
+fn parse_selection(selection: &Expr) -> Result<Option<Filter>, String> {
+    let filter = {
+        if let Expr::BinaryOp { left, op, right } = selection {
+            let col_name = extract_column_name(&left)?;
+            let op_type = match op {
+                BinaryOperator::Eq => Operator::Eq,
+                BinaryOperator::NotEq => Operator::NotEq,
+                BinaryOperator::Gt => Operator::GreaterThan,
+                BinaryOperator::Lt => Operator::LessThan,
+                _ => return Err("Unsupported operator".to_string()),
+            };
+            let val = convert_expr_to_field(&right)?;
+
+            Some(Filter {
+                column_name: col_name,
+                operator: op_type,
+                value: val,
+            })
+        } else {
+            None
+        }
+    };
+
+    Ok(filter)
 }
 
 fn convert_column(col: ColumnDef) -> Result<Column, String> {

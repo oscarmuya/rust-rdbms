@@ -5,7 +5,7 @@ use crate::index::PrimaryIndex;
 use crate::sql::Command;
 use crate::storage::Table;
 use crate::storage::pager::Pager;
-use crate::storage::record::Row;
+use crate::storage::record::{Field, Row};
 
 pub struct Database {
     pub catalog: Catalog,
@@ -69,7 +69,11 @@ impl Database {
                 Ok("Inserted 1 row.".to_string())
             }
 
-            Command::Select { table_name, join } => {
+            Command::Select {
+                table_name,
+                join,
+                filter,
+            } => {
                 let schema = self
                     .catalog
                     .tables
@@ -82,73 +86,118 @@ impl Database {
                     schema: schema.clone(),
                     index: crate::index::PrimaryIndex::new(),
                 };
-                let rows = table.scan_rows().map_err(|e| e.to_string())?;
+                table.load_index().map_err(|e| e.to_string())?;
 
-                // Handle join if present
-                let final_rows = if let Some(join_info) = join {
-                    // Get right table schema and rows
-                    let right_schema = self
-                        .catalog
-                        .tables
-                        .get(&join_info.right_table)
-                        .ok_or_else(|| format!("Table {} not found", join_info.right_table))?;
-                    let right_path = format!("{}/{}.db", self.data_dir, join_info.right_table);
-                    let right_pager = Pager::open(&right_path).map_err(|e| e.to_string())?;
-                    let mut right_table = Table {
-                        pager: right_pager,
-                        schema: right_schema.clone(),
-                        index: crate::index::PrimaryIndex::new(),
-                    };
-                    let right_rows = right_table.scan_rows().map_err(|e| e.to_string())?;
+                let mut final_rows = Vec::new();
+                let mut used_index = false;
+                let mut columns_for_display;
 
-                    // Find column indexes
-                    let left_col_idx = schema
-                        .columns
-                        .iter()
-                        .position(|c| c.name == join_info.left_column)
-                        .ok_or_else(|| {
-                            format!(
-                                "Column {} not found in table {}",
-                                join_info.left_column, table_name
-                            )
-                        })?;
+                // Check for optimization (fast path with index)
+                if let (None, Some(f)) = (&join, &filter) {
+                    let pk_col = schema.columns.iter().find(|c| c.is_primary);
 
-                    let right_col_idx = right_schema
-                        .columns
-                        .iter()
-                        .position(|c| c.name == join_info.right_column)
-                        .ok_or_else(|| {
-                            format!(
-                                "Column {} not found in table {}",
-                                join_info.right_column, join_info.right_table
-                            )
-                        })?;
+                    if let Some(pk) = pk_col {
+                        if f.column_name == pk.name
+                            && matches!(f.operator, crate::sql::Operator::Eq)
+                        {
+                            // Convert filter value to string key for index lookup
+                            let key = match &f.value {
+                                Field::Integer(v) => v.to_string(),
+                                Field::Text(v) => v.clone(),
+                                Field::Boolean(v) => v.to_string(),
+                            };
 
-                    // Perform join
-                    let mut joined_rows = Vec::new();
-                    for row_a in &rows {
-                        for row_b in &right_rows {
-                            if row_a.fields[left_col_idx] == row_b.fields[right_col_idx] {
-                                // Merge rows
-                                let mut merged_fields = row_a.fields.clone();
-                                merged_fields.extend(row_b.fields.clone());
-                                joined_rows.push(Row {
-                                    fields: merged_fields,
-                                });
+                            // Look up in B-Tree
+                            if let Some((p_idx, s_idx)) = table.index.map.get(&key) {
+                                let row =
+                                    table.get_row(*p_idx, *s_idx).map_err(|e| e.to_string())?;
+                                final_rows.push(row);
                             }
+                            used_index = true;
+                            columns_for_display = schema.columns.clone();
+                        } else {
+                            columns_for_display = schema.columns.clone();
                         }
+                    } else {
+                        columns_for_display = schema.columns.clone();
+                    }
+                } else {
+                    columns_for_display = schema.columns.clone();
+                }
+
+                // Slow path (fallback if not optimized)
+                if !used_index {
+                    let mut rows = table.scan_rows().map_err(|e| e.to_string())?;
+
+                    // Apply filter if present
+                    if let Some(f) = filter {
+                        rows.retain(|r| Row::row_matches_filter(r, &f, &schema));
                     }
 
-                    // Build merged schema for display
-                    let mut merged_columns = schema.columns.clone();
-                    merged_columns.extend(right_schema.columns.clone());
+                    // Handle join if present
+                    if let Some(join_info) = join {
+                        // Get right table schema and rows
+                        let right_schema = self
+                            .catalog
+                            .tables
+                            .get(&join_info.right_table)
+                            .ok_or_else(|| format!("Table {} not found", join_info.right_table))?;
+                        let right_path = format!("{}/{}.db", self.data_dir, join_info.right_table);
+                        let right_pager = Pager::open(&right_path).map_err(|e| e.to_string())?;
+                        let mut right_table = Table {
+                            pager: right_pager,
+                            schema: right_schema.clone(),
+                            index: crate::index::PrimaryIndex::new(),
+                        };
+                        let right_rows = right_table.scan_rows().map_err(|e| e.to_string())?;
 
-                    (joined_rows, merged_columns)
-                } else {
-                    (rows, schema.columns.clone())
-                };
+                        // Find column indexes
+                        let left_col_idx = schema
+                            .columns
+                            .iter()
+                            .position(|c| c.name == join_info.left_column)
+                            .ok_or_else(|| {
+                                format!(
+                                    "Column {} not found in table {}",
+                                    join_info.left_column, table_name
+                                )
+                            })?;
 
-                if final_rows.0.is_empty() {
+                        let right_col_idx = right_schema
+                            .columns
+                            .iter()
+                            .position(|c| c.name == join_info.right_column)
+                            .ok_or_else(|| {
+                                format!(
+                                    "Column {} not found in table {}",
+                                    join_info.right_column, join_info.right_table
+                                )
+                            })?;
+
+                        // Perform join
+                        for row_a in &rows {
+                            for row_b in &right_rows {
+                                if row_a.fields[left_col_idx] == row_b.fields[right_col_idx] {
+                                    // Merge rows
+                                    let mut merged_fields = row_a.fields.clone();
+                                    merged_fields.extend(row_b.fields.clone());
+                                    final_rows.push(Row {
+                                        fields: merged_fields,
+                                    });
+                                }
+                            }
+                        }
+
+                        // Build merged schema for display
+                        columns_for_display = schema.columns.clone();
+                        columns_for_display.extend(right_schema.columns.clone());
+                    } else {
+                        final_rows = rows;
+                        columns_for_display = schema.columns.clone();
+                    }
+                }
+
+                if final_rows.is_empty() {
                     return Ok("No rows found.".to_string());
                 }
 
@@ -158,15 +207,14 @@ impl Database {
                 let mut table_data: Vec<Vec<_>> = Vec::new();
 
                 // Add header row
-                let headers: Vec<_> = final_rows
-                    .1
+                let headers: Vec<_> = columns_for_display
                     .iter()
                     .map(|c| c.name.clone().cell().bold(true))
                     .collect();
                 table_data.push(headers);
 
                 // Add data rows
-                for row in final_rows.0 {
+                for row in final_rows {
                     let values: Vec<_> = row
                         .fields
                         .iter()
@@ -177,6 +225,11 @@ impl Database {
 
                 let cli_table = table_data.table();
                 print_stdout(cli_table).map_err(|e| e.to_string())?;
+
+                if used_index {
+                    println!("(Optimization used: Primary Key Index Lookup)");
+                }
+
                 Ok(String::new())
             }
         }

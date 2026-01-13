@@ -14,16 +14,19 @@ mod tests {
                     name: "id".to_string(),
                     data_type: DataType::Integer,
                     is_primary: true,
+                    is_autoincrement: true,
                 },
                 Column {
                     name: "active".to_string(),
                     data_type: DataType::Boolean,
                     is_primary: false,
+                    is_autoincrement: false,
                 },
                 Column {
                     name: "name".to_string(),
                     data_type: DataType::Text(20),
                     is_primary: false,
+                    is_autoincrement: false,
                 },
             ],
         };

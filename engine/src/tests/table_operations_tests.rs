@@ -20,11 +20,13 @@ mod tests {
                     name: "id".to_string(),
                     data_type: DataType::Integer,
                     is_primary: true,
+                    is_autoincrement: true,
                 },
                 Column {
                     name: "name".to_string(),
                     data_type: DataType::Text(32),
                     is_primary: false,
+                    is_autoincrement: false,
                 },
             ],
         };

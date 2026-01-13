@@ -12,6 +12,7 @@ pub struct Column {
     pub name: String,
     pub data_type: DataType,
     pub is_primary: bool,
+    pub is_autoincrement: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

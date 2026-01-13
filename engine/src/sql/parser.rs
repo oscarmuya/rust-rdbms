@@ -152,10 +152,17 @@ fn convert_column(col: ColumnDef) -> Result<Column, String> {
         )
     });
 
+    let is_autoincrement = col.options.iter().any(|opt| {
+        matches!(opt.option, sqlparser::ast::ColumnOption::DialectSpecific(ref tokens)
+            if tokens.iter().any(|t| t.to_string().to_uppercase() == "AUTOINCREMENT" || t.to_string().to_uppercase() == "AUTO_INCREMENT")
+        )
+    });
+
     Ok(Column {
         name: col.name.to_string(),
         data_type,
         is_primary,
+        is_autoincrement,
     })
 }
 

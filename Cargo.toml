@@ -2,4 +2,4 @@
 members = [
   "cli",
   "engine"
-]
+, "web"]

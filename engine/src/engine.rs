@@ -73,6 +73,72 @@ impl Database {
                 Ok(format!("Inserted 1 row : {:?}", prepared_row).to_string())
             }
 
+            Command::DropTable { table_name } => {
+                // 1. Remove from Catalog
+                if self.catalog.tables.remove(&table_name).is_none() {
+                    return Err(format!("Table {} not found", table_name));
+                }
+                self.catalog.sequences.remove(&table_name);
+                self.catalog.save();
+
+                // 2. Delete the physical file
+                let path = format!("{}/{}.db", self.data_dir, table_name);
+                if std::path::Path::new(&path).exists() {
+                    std::fs::remove_file(path).map_err(|e| e.to_string())?;
+                }
+
+                Ok(format!("Table {} dropped.", table_name))
+            }
+
+            Command::Delete { table_name, filter } => {
+                let schema = self
+                    .catalog
+                    .tables
+                    .get(&table_name)
+                    .ok_or("Table not found")?;
+                let path = format!("{}/{}.db", self.data_dir, table_name);
+                let pager = Pager::open(&path).map_err(|e| e.to_string())?;
+                let mut table = Table {
+                    pager,
+                    schema: schema.clone(),
+                    index: crate::index::PrimaryIndex::new(),
+                };
+                table.load_index().map_err(|e| e.to_string())?;
+
+                let mut deleted_count = 0;
+                let mut targets = Vec::new();
+
+                // TODO: Insert Index Optimization Logic
+                for p_idx in 0..table.pager.num_pages() {
+                    let page = table.pager.read_page(p_idx).map_err(|e| e.to_string())?;
+                    for s_idx in 0..(PAGE_SIZE - HEADER_SIZE) / schema.row_size() {
+                        if page.is_slot_full(s_idx) {
+                            let row = table.get_row(p_idx, s_idx).map_err(|e| e.to_string())?;
+                            if filter
+                                .as_ref()
+                                .map_or(true, |f| Row::row_matches_filter(&row, f, &schema))
+                            {
+                                targets.push((p_idx, s_idx, row));
+                            }
+                        }
+                    }
+                }
+
+                // 2. Perform deletion
+                for (p_idx, s_idx, row) in targets {
+                    table.delete_row(p_idx, s_idx).map_err(|e| e.to_string())?;
+
+                    // IMPORTANT: Remove from Index
+                    if let Some(pk_idx) = schema.columns.iter().position(|c| c.is_primary) {
+                        let pk_val = format!("{:?}", row.fields[pk_idx]);
+                        table.index.map.remove(&pk_val);
+                    }
+                    deleted_count += 1;
+                }
+
+                Ok(format!("Deleted {} rows.", deleted_count))
+            }
+
             Command::Update {
                 table_name,
                 assignments,

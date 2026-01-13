@@ -80,6 +80,21 @@ impl Table {
         Ok(())
     }
 
+    pub fn update_row(
+        &mut self,
+        page_idx: usize,
+        slot_idx: usize,
+        row: Row,
+    ) -> std::io::Result<()> {
+        let mut page = self.pager.read_page(page_idx)?;
+        let serialized_row = row.serialize(&self.schema);
+
+        let offset = page.get_row_offset(slot_idx, self.schema.row_size());
+        page.data[offset..offset + self.schema.row_size()].copy_from_slice(&serialized_row);
+
+        self.pager.write_page(page_idx, &page)
+    }
+
     pub fn scan_rows(&mut self) -> std::io::Result<Vec<Row>> {
         let mut rows = Vec::new();
         let max_slots = (PAGE_SIZE - HEADER_SIZE) / self.schema.row_size();

@@ -5,7 +5,7 @@ use crate::catalog::schema::DataType;
 use crate::index::PrimaryIndex;
 use crate::sql::Command;
 use crate::storage::Table;
-use crate::storage::pager::Pager;
+use crate::storage::pager::{HEADER_SIZE, PAGE_SIZE, Pager};
 use crate::storage::record::{Field, Row};
 
 pub struct Database {
@@ -71,6 +71,72 @@ impl Database {
                     .insert_row(prepared_row.clone())
                     .map_err(|e| e.to_string())?;
                 Ok(format!("Inserted 1 row : {:?}", prepared_row).to_string())
+            }
+
+            Command::Update {
+                table_name,
+                assignments,
+                filter,
+            } => {
+                let schema = self
+                    .catalog
+                    .tables
+                    .get(&table_name)
+                    .ok_or("Table not found")?;
+                let path = format!("{}/{}.db", self.data_dir, table_name);
+                let pager = Pager::open(&path).map_err(|e| e.to_string())?;
+                let mut table = Table {
+                    pager,
+                    schema: schema.clone(),
+                    index: crate::index::PrimaryIndex::new(),
+                };
+                table.load_index().map_err(|e| e.to_string())?;
+
+                let mut updated_count = 0;
+
+                // 1: Find which rows to update
+                let mut targets = Vec::new(); // Stores (page_idx, slot_idx, Row)
+
+                // TODO: Add Index Optimization Logic here if filter is PK = Val]
+                for p_idx in 0..table.pager.num_pages() {
+                    let page = table.pager.read_page(p_idx).map_err(|e| e.to_string())?;
+                    for s_idx in 0..(PAGE_SIZE - HEADER_SIZE) / schema.row_size() {
+                        if page.is_slot_full(s_idx) {
+                            let row = table.get_row(p_idx, s_idx).map_err(|e| e.to_string())?;
+                            if filter
+                                .as_ref()
+                                .map_or(true, |f| Row::row_matches_filter(&row, f, &schema))
+                            {
+                                targets.push((p_idx, s_idx, row));
+                            }
+                        }
+                    }
+                }
+
+                // 2: Apply Updates and Write Back
+                for (p_idx, s_idx, mut row) in targets {
+                    for (col_name, new_val) in &assignments {
+                        let col_idx = schema
+                            .columns
+                            .iter()
+                            .position(|c| &c.name == col_name)
+                            .ok_or(format!("Column {} not found", col_name))?;
+
+                        // Check if user is trying to update a Primary Key prevent this
+                        if schema.columns[col_idx].is_primary {
+                            return Err("Updating Primary Key is not allowed".to_string());
+                        }
+
+                        row.fields[col_idx] = new_val.clone();
+                    }
+
+                    table
+                        .update_row(p_idx, s_idx, row)
+                        .map_err(|e| e.to_string())?;
+                    updated_count += 1;
+                }
+
+                Ok(format!("Updated {} rows.", updated_count))
             }
 
             Command::Select {

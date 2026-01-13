@@ -30,6 +30,55 @@ pub fn parse_sql(sql: &str) -> Result<Vec<Command>, String> {
                 });
             }
 
+            Statement::Update {
+                table,
+                assignments,
+                selection,
+                ..
+            } => {
+                let table_name = table.to_string();
+
+                // 1. Map assignments (SET col = val)
+                let mut update_list = Vec::new();
+                for assignment in assignments {
+                    let col_name = assignment.id.first().unwrap().value.clone();
+                    let val = convert_expr_to_field(&assignment.value)?;
+                    update_list.push((col_name, val));
+                }
+
+                // 2. Map WHERE clause
+                let filter = if let Some(selection) = selection {
+                    if let Expr::BinaryOp { left, op, right } = selection {
+                        let col_name = extract_column_name(&left)?;
+                        let op_type = match op {
+                            BinaryOperator::Eq => Operator::Eq,
+                            BinaryOperator::NotEq => Operator::NotEq,
+                            BinaryOperator::Gt => Operator::GreaterThan,
+                            BinaryOperator::Lt => Operator::LessThan,
+                            _ => return Err("Unsupported operator".to_string()),
+                        };
+                        // Turn the 'right' side into a Field
+                        let val = convert_expr_to_field(&right)?;
+
+                        Some(Filter {
+                            column_name: col_name,
+                            operator: op_type,
+                            value: val,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                commands.push(Command::Update {
+                    table_name,
+                    assignments: update_list,
+                    filter,
+                });
+            }
+
             Statement::Insert {
                 table_name, source, ..
             } => {

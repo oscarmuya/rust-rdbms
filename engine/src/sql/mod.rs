@@ -20,6 +20,12 @@ pub enum Command {
         filter: Option<Filter>,
         join: Option<JoinClause>,
     },
+    Update {
+        table_name: String,
+        // Column name and the new value
+        assignments: Vec<(String, Field)>,
+        filter: Option<Filter>,
+    },
 }
 
 #[derive(Debug)]

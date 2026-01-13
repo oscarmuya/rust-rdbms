@@ -2,7 +2,7 @@
 
 **ScarDB** is a lightweight Relational Database Management System (RDBMS) implemented in **Rust**. It features a custom storage engine, a schema-driven binary serialization format, B-Tree indexing for optimized lookups, and a relational execution engine capable of performing Nested Loop Joins.
 
-Developed for the **Pesapal Junior Dev Challenge '26**, this project demonstrates the implementation of low-level database internals, moving from raw byte manipulation on disk to a high-level SQL interface.
+This project demonstrates the implementation of low-level database internals, moving from raw byte manipulation on disk to a high-level SQL interface.
 
 ## Key Features
 

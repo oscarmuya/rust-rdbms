@@ -1,6 +1,7 @@
 use std::fs;
 
 use crate::catalog::Catalog;
+use crate::catalog::schema::DataType;
 use crate::index::PrimaryIndex;
 use crate::sql::Command;
 use crate::storage::Table;
@@ -63,10 +64,13 @@ impl Database {
 
                 // 3. Warm up index (So PK violation check works)
                 table.load_index().map_err(|e| e.to_string())?;
+                let prepared_row = self.validate_and_prepare_row(&table_name, row.fields)?;
 
                 // 4. Perform insert
-                table.insert_row(row).map_err(|e| e.to_string())?;
-                Ok("Inserted 1 row.".to_string())
+                table
+                    .insert_row(prepared_row.clone())
+                    .map_err(|e| e.to_string())?;
+                Ok(format!("Inserted 1 row : {:?}", prepared_row).to_string())
             }
 
             Command::Select {
@@ -233,5 +237,76 @@ impl Database {
                 Ok(String::new())
             }
         }
+    }
+
+    fn validate_and_prepare_row(
+        &mut self,
+        table_name: &str,
+        provided_fields: Vec<Field>,
+    ) -> Result<Row, String> {
+        let schema = self
+            .catalog
+            .tables
+            .get(table_name)
+            .ok_or_else(|| format!("Table {} not found", table_name))?;
+
+        let mut final_fields = provided_fields;
+
+        // 1. Handle Autoincrement Logic
+        if let Some(auto_idx) = schema.columns.iter().position(|c| c.is_autoincrement) {
+            let next_id = self.catalog.get_next_id(table_name);
+            let schema = self.catalog.tables.get(table_name).unwrap();
+
+            let auto_field = Field::Integer(next_id);
+
+            if final_fields.len() == schema.columns.len() {
+                // Scenario: User provided an ID, but we override it
+                final_fields[auto_idx] = auto_field;
+            } else if final_fields.len() == schema.columns.len() - 1 {
+                // Scenario: User omitted the ID, we insert it at the correct position
+                final_fields.insert(auto_idx, auto_field);
+            } else {
+                return Err(format!(
+                    "Column count mismatch: expected {} or {} (with autoincrement), found {}",
+                    schema.columns.len(),
+                    schema.columns.len() - 1,
+                    final_fields.len()
+                ));
+            }
+        }
+
+        let schema = self.catalog.tables.get(table_name).unwrap();
+        // 2. Final Length Check (for tables without autoincrement)
+        if final_fields.len() != schema.columns.len() {
+            return Err(format!(
+                "Table {} expects {} columns, but {} were provided",
+                table_name,
+                schema.columns.len(),
+                final_fields.len()
+            ));
+        }
+
+        // 3. Type Validation
+        for (i, column) in schema.columns.iter().enumerate() {
+            let provided = &final_fields[i];
+
+            let is_valid = match (&column.data_type, provided) {
+                (DataType::Integer, Field::Integer(_)) => true,
+                (DataType::Boolean, Field::Boolean(_)) => true,
+                (DataType::Text(_), Field::Text(_)) => true,
+                _ => false,
+            };
+
+            if !is_valid {
+                return Err(format!(
+                    "Type mismatch for column '{}': expected {:?}, found {:?}",
+                    column.name, column.data_type, provided
+                ));
+            }
+        }
+
+        Ok(Row {
+            fields: final_fields,
+        })
     }
 }

@@ -26,6 +26,13 @@ pub enum Command {
         assignments: Vec<(String, Field)>,
         filter: Option<Filter>,
     },
+    Delete {
+        table_name: String,
+        filter: Option<Filter>,
+    },
+    DropTable {
+        table_name: String,
+    },
 }
 
 #[derive(Debug)]

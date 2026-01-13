@@ -1,6 +1,7 @@
 use std::fs;
 
 use crate::catalog::Catalog;
+use crate::index::PrimaryIndex;
 use crate::sql::Command;
 use crate::storage::Table;
 use crate::storage::pager::Pager;
@@ -32,6 +33,13 @@ impl Database {
                     table_name: name.clone(),
                     columns,
                 };
+
+                let table = self.catalog.tables.get(&name);
+
+                if let Some(_) = table {
+                    return Err(format!("Table {} already exists", &name));
+                }
+
                 self.catalog.add_table(schema);
                 Ok(format!("Table {} created.", name))
             }
@@ -50,7 +58,7 @@ impl Database {
                 let mut table = Table {
                     pager,
                     schema: schema.clone(),
-                    index: crate::index::PrimaryIndex::new(),
+                    index: PrimaryIndex::new(),
                 };
 
                 // 3. Warm up index (So PK violation check works)

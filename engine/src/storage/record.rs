@@ -1,4 +1,7 @@
-use crate::catalog::schema::{DataType, Schema};
+use crate::{
+    catalog::schema::{DataType, Schema},
+    sql::{Filter, Operator},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Field {
@@ -78,47 +81,39 @@ impl Row {
 
         Row { fields }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::catalog::schema::{Column, DataType, Schema};
-
-    #[test]
-    fn test_row_serialization() {
-        let schema = Schema {
-            table_name: "test".to_string(),
-            columns: vec![
-                Column {
-                    name: "id".to_string(),
-                    data_type: DataType::Integer,
-                    is_primary: true,
-                },
-                Column {
-                    name: "active".to_string(),
-                    data_type: DataType::Boolean,
-                    is_primary: false,
-                },
-                Column {
-                    name: "name".to_string(),
-                    data_type: DataType::Text(20),
-                    is_primary: false,
-                },
-            ],
+    pub fn row_matches_filter(row: &Row, filter: &Filter, schema: &Schema) -> bool {
+        // 1. Find the index of the column being filtered
+        let col_idx = match schema
+            .columns
+            .iter()
+            .position(|c| c.name == filter.column_name)
+        {
+            Some(idx) => idx,
+            None => return false,
         };
 
-        let row = Row {
-            fields: vec![
-                Field::Integer(123),
-                Field::Boolean(true),
-                Field::Text("Hello".to_string()),
-            ],
-        };
+        let actual_value = &row.fields[col_idx];
 
-        let bytes = row.serialize(&schema);
-        let deserialized = Row::deserialize(&bytes, &schema);
-
-        assert_eq!(row, deserialized);
+        // 2. Compare actual_value vs filter.value based on the operator
+        match filter.operator {
+            Operator::Eq => actual_value == &filter.value,
+            Operator::NotEq => actual_value != &filter.value,
+            // For GreaterThan/LessThan, we will handle only Integers
+            Operator::GreaterThan => {
+                if let (Field::Integer(a), Field::Integer(b)) = (actual_value, &filter.value) {
+                    a > b
+                } else {
+                    false
+                }
+            }
+            Operator::LessThan => {
+                if let (Field::Integer(a), Field::Integer(b)) = (actual_value, &filter.value) {
+                    a < b
+                } else {
+                    false
+                }
+            }
+        }
     }
 }

@@ -1,5 +1,5 @@
 use crate::catalog::schema::{Column, DataType};
-use crate::sql::{Command, JoinClause};
+use crate::sql::{Command, Filter, JoinClause, Operator};
 use crate::storage::record::{Field, Row};
 use sqlparser::ast::{
     BinaryOperator, ColumnDef, DataType as SQLDataType, Expr, JoinConstraint, JoinOperator,
@@ -92,9 +92,35 @@ pub fn parse_sql(sql: &str) -> Result<Vec<Command>, String> {
                         }
                     }
 
+                    let filter = if let Some(selection) = select.selection {
+                        if let Expr::BinaryOp { left, op, right } = selection {
+                            let col_name = extract_column_name(&left)?;
+                            let op_type = match op {
+                                BinaryOperator::Eq => Operator::Eq,
+                                BinaryOperator::NotEq => Operator::NotEq,
+                                BinaryOperator::Gt => Operator::GreaterThan,
+                                BinaryOperator::Lt => Operator::LessThan,
+                                _ => return Err("Unsupported operator".to_string()),
+                            };
+                            // Turn the 'right' side into a Field
+                            let val = convert_expr_to_field(&right)?;
+
+                            Some(Filter {
+                                column_name: col_name,
+                                operator: op_type,
+                                value: val,
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
                     commands.push(Command::Select {
                         table_name: left_table,
                         join: join_info,
+                        filter,
                     });
                 }
             }

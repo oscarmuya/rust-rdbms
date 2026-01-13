@@ -1,6 +1,6 @@
 pub mod parser;
 
-use crate::catalog::schema::{Column, DataType, Schema};
+use crate::catalog::schema::Column;
 use crate::storage::record::{Field, Row};
 
 #[derive(Debug)]
@@ -17,8 +17,24 @@ pub enum Command {
         table_name: String,
         // Later we will add:
         // filters: Vec<Expression>,
+        filter: Option<Filter>,
         join: Option<JoinClause>,
     },
+}
+
+#[derive(Debug)]
+pub enum Operator {
+    Eq,
+    NotEq,
+    GreaterThan,
+    LessThan,
+}
+
+#[derive(Debug)]
+pub struct Filter {
+    pub column_name: String,
+    pub operator: Operator,
+    pub value: Field,
 }
 
 #[derive(Debug)]

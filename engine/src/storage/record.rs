@@ -1,9 +1,11 @@
+use serde::Serialize;
+
 use crate::{
     catalog::schema::{DataType, Schema},
     sql::{Filter, Operator},
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Field {
     Integer(i32),
     Boolean(bool),

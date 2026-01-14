@@ -102,8 +102,10 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 name = "cli"
 version = "0.1.0"
 dependencies = [
+ "cli-table",
  "engine",
  "rustyline",
+ "serde",
 ]
 
 [[package]]
@@ -169,7 +171,6 @@ checksum = "c34f04666d835ff5d62e058c3995147c06f42fe86ff053337632bca83e42702d"
 name = "engine"
 version = "0.1.0"
 dependencies = [
- "cli-table",
  "serde",
  "serde_json",
  "sqlparser",

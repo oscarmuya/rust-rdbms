@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 rustyline = "17.0.2"
 engine = { path = "../engine" }
+cli-table = "0.5.0"
+serde = "1.0.228"

@@ -3,8 +3,8 @@ use axum::{
     response::Html,
     routing::{get, post},
 };
-use engine::engine::Database;
 use engine::sql::parser::parse_sql;
+use engine::{engine::Database, sql::QueryResult};
 use std::sync::{Arc, Mutex};
 
 struct AppState {
@@ -117,7 +117,7 @@ async fn serve_html() -> Html<&'static str> {
             <textarea id="sql-input" placeholder="Enter your SQL command here..."></textarea>
         </div>
         <button onclick="executeQuery()">Execute</button>
-        <div id="result" class="result"></div>
+        <pre id="result" class="result"></pre>
     </div>
     <script>
         async function executeQuery() {
@@ -163,19 +163,19 @@ async fn serve_html() -> Html<&'static str> {
 async fn handle_query(
     state: axum::extract::State<Arc<AppState>>,
     Json(payload): Json<String>,
-) -> String {
+) -> Json<Vec<QueryResult>> {
     let mut db = state.db.lock().unwrap();
     match parse_sql(&payload) {
         Ok(commands) => {
-            let mut results = String::new();
+            let mut results = Vec::new();
             for cmd in commands {
                 match db.execute(cmd) {
-                    Ok(res) => results.push_str(&res),
-                    Err(e) => results.push_str(&format!("Error: {}", e)),
+                    Ok(res) => results.push(res),
+                    Err(e) => results.push(QueryResult::Message(format!("Error: {}", e))),
                 }
             }
-            results
+            Json(results)
         }
-        Err(e) => format!("SQL Error: {}", e),
+        Err(e) => Json(vec![QueryResult::Message(format!("SQL Error: {}", e))]),
     }
 }

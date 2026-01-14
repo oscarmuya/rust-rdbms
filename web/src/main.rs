@@ -47,7 +47,7 @@ async fn serve_html() -> Html<&'static str> {
             background: #fafafa;
         }
         .container {
-            max-width: 800px;
+            max-width: 900px;
             margin: 0 auto;
         }
         h1 {
@@ -90,9 +90,6 @@ async fn serve_html() -> Html<&'static str> {
         button:hover {
             background: #2a2a2a;
         }
-        button:active {
-            background: #0a0a0a;
-        }
         .result {
             margin-top: 2rem;
             padding: 1rem;
@@ -101,11 +98,53 @@ async fn serve_html() -> Html<&'static str> {
             border-radius: 6px;
             white-space: pre-wrap;
             font-family: 'Courier New', monospace;
-            font-size: 13px;
+            font-size: 12px;
             display: none;
+            max-height: 200px;
+            overflow: auto;
         }
         .result.show {
             display: block;
+        }
+
+        /* Table Styles */
+        .table-container {
+            margin-top: 1.5rem;
+            overflow-x: auto;
+            border-radius: 6px;
+            border: 1px solid #e4e4e4;
+            background: white;
+            display: none;
+        }
+        .table-container.show {
+            display: block;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+            text-align: left;
+        }
+        th {
+            background: #f4f4f4;
+            font-weight: 600;
+            padding: 12px;
+            border-bottom: 2px solid #e4e4e4;
+        }
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #eee;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        tr:hover {
+            background: #f9f9f9;
+        }
+        .type-label {
+            font-size: 10px;
+            color: #888;
+            margin-left: 5px;
         }
     </style>
 </head>
@@ -117,34 +156,99 @@ async fn serve_html() -> Html<&'static str> {
             <textarea id="sql-input" placeholder="Enter your SQL command here..."></textarea>
         </div>
         <button onclick="executeQuery()">Execute</button>
+
         <pre id="result" class="result"></pre>
+
+        <div id="table-container" class="table-container">
+            <table id="data-table">
+                <thead id="table-head"></thead>
+                <tbody id="table-body"></tbody>
+            </table>
+        </div>
     </div>
+
     <script>
         async function executeQuery() {
             const sql = document.getElementById('sql-input').value;
             const resultDiv = document.getElementById('result');
+            const tableContainer = document.getElementById('table-container');
+            const tableHead = document.getElementById('table-head');
+            const tableBody = document.getElementById('table-body');
 
             if (!sql.trim()) {
                 resultDiv.textContent = 'Please enter a SQL command';
                 resultDiv.classList.add('show');
+                tableContainer.classList.remove('show');
                 return;
             }
 
             try {
                 const response = await fetch('/query', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(sql)
                 });
 
-                const result = await response.text();
-                resultDiv.textContent = result;
+                const rawText = await response.text();
+                resultDiv.textContent = rawText;
                 resultDiv.classList.add('show');
+
+                const data = JSON.parse(rawText);
+                renderTable(data);
+
             } catch (error) {
                 resultDiv.textContent = 'Error: ' + error.message;
                 resultDiv.classList.add('show');
+                tableContainer.classList.remove('show');
+            }
+        }
+
+        function renderTable(data) {
+            const tableContainer = document.getElementById('table-container');
+            const tableHead = document.getElementById('table-head');
+            const tableBody = document.getElementById('table-body');
+
+            // Clear previous results
+            tableHead.innerHTML = '';
+            tableBody.innerHTML = '';
+            tableContainer.classList.remove('show');
+
+            if (!Array.isArray(data) || data.length === 0) return;
+
+            const firstResult = data[0];
+
+            if (firstResult.Data) {
+                const cols = firstResult.Data.columns;
+                const rows = firstResult.Data.rows;
+
+                // Create Headers
+                const headerRow = document.createElement('tr');
+                cols.forEach(colName => {
+                    const th = document.createElement('th');
+                    th.textContent = colName;
+                    headerRow.appendChild(th);
+                });
+                tableHead.appendChild(headerRow);
+
+                // Create Rows
+                rows.forEach(row => {
+                    const tr = document.createElement('tr');
+                    row.forEach(cell => {
+                        const td = document.createElement('td');
+                        // Extract value from format: {"Integer": 1} or {"Text": "oscar"}
+                        const valueKey = Object.keys(cell)[0];
+                        const value = cell[valueKey];
+
+                        td.innerHTML = `${value}<span class="type-label">(${valueKey})</span>`;
+                        tr.appendChild(td);
+                    });
+                    tableBody.appendChild(tr);
+                });
+
+                tableContainer.classList.add('show');
+            } else if (firstResult.Message) {
+                // If it's just a message, we only show it in the pre tag (already done)
+                tableContainer.classList.remove('show');
             }
         }
 

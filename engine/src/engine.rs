@@ -3,7 +3,7 @@ use std::fs;
 use crate::catalog::Catalog;
 use crate::catalog::schema::DataType;
 use crate::index::PrimaryIndex;
-use crate::sql::Command;
+use crate::sql::{Command, QueryResponse, QueryResult};
 use crate::storage::Table;
 use crate::storage::pager::{HEADER_SIZE, PAGE_SIZE, Pager};
 use crate::storage::record::{Field, Row};
@@ -27,7 +27,7 @@ impl Database {
         }
     }
 
-    pub fn execute(&mut self, command: Command) -> Result<String, String> {
+    pub fn execute(&mut self, command: Command) -> Result<QueryResult, String> {
         match command {
             Command::CreateTable { name, columns } => {
                 let schema = crate::catalog::schema::Schema {
@@ -42,7 +42,9 @@ impl Database {
                 }
 
                 self.catalog.add_table(schema);
-                Ok(format!("Table {} created.", name))
+                Ok(QueryResult::Message(
+                    format!("Table {} created.", name).into(),
+                ))
             }
 
             Command::Insert { table_name, row } => {
@@ -70,7 +72,9 @@ impl Database {
                 table
                     .insert_row(prepared_row.clone())
                     .map_err(|e| e.to_string())?;
-                Ok(format!("Inserted 1 row : {:?}", prepared_row).to_string())
+                Ok(QueryResult::Message(
+                    format!("Inserted 1 row : {:?}", prepared_row).to_string(),
+                ))
             }
 
             Command::DropTable { table_name } => {
@@ -87,7 +91,10 @@ impl Database {
                     std::fs::remove_file(path).map_err(|e| e.to_string())?;
                 }
 
-                Ok(format!("Table {} dropped.", table_name))
+                Ok(QueryResult::Message(format!(
+                    "Table {} dropped.",
+                    table_name
+                )))
             }
 
             Command::Delete { table_name, filter } => {
@@ -136,7 +143,10 @@ impl Database {
                     deleted_count += 1;
                 }
 
-                Ok(format!("Deleted {} rows.", deleted_count))
+                Ok(QueryResult::Message(format!(
+                    "Deleted {} rows.",
+                    deleted_count
+                )))
             }
 
             Command::Update {
@@ -202,7 +212,10 @@ impl Database {
                     updated_count += 1;
                 }
 
-                Ok(format!("Updated {} rows.", updated_count))
+                Ok(QueryResult::Message(format!(
+                    "Updated {} rows.",
+                    updated_count
+                )))
             }
 
             Command::Select {
@@ -226,7 +239,7 @@ impl Database {
 
                 let mut final_rows = Vec::new();
                 let mut used_index = false;
-                let mut columns_for_display;
+                let mut merged_columns;
 
                 // Check for optimization (fast path with index)
                 if let (None, Some(f)) = (&join, &filter) {
@@ -250,15 +263,15 @@ impl Database {
                                 final_rows.push(row);
                             }
                             used_index = true;
-                            columns_for_display = schema.columns.clone();
+                            merged_columns = schema.columns.clone();
                         } else {
-                            columns_for_display = schema.columns.clone();
+                            merged_columns = schema.columns.clone();
                         }
                     } else {
-                        columns_for_display = schema.columns.clone();
+                        merged_columns = schema.columns.clone();
                     }
                 } else {
-                    columns_for_display = schema.columns.clone();
+                    merged_columns = schema.columns.clone();
                 }
 
                 // Slow path (fallback if not optimized)
@@ -324,49 +337,26 @@ impl Database {
                             }
                         }
 
-                        // Build merged schema for display
-                        columns_for_display = schema.columns.clone();
-                        columns_for_display.extend(right_schema.columns.clone());
+                        merged_columns = schema.columns.clone();
+                        merged_columns.extend(right_schema.columns.clone());
                     } else {
                         final_rows = rows;
-                        columns_for_display = schema.columns.clone();
+                        merged_columns = schema.columns.clone();
                     }
                 }
 
                 if final_rows.is_empty() {
-                    return Ok("No rows found.".to_string());
+                    return Ok(QueryResult::Message("No rows found.".to_string()));
                 }
-
-                use cli_table::{Cell, Style, Table as CliTable, print_stdout};
-
-                // Build table data
-                let mut table_data: Vec<Vec<_>> = Vec::new();
-
-                // Add header row
-                let headers: Vec<_> = columns_for_display
-                    .iter()
-                    .map(|c| c.name.clone().cell().bold(true))
-                    .collect();
-                table_data.push(headers);
-
-                // Add data rows
-                for row in final_rows {
-                    let values: Vec<_> = row
-                        .fields
-                        .iter()
-                        .map(|v| format!("{:?}", v).cell())
-                        .collect();
-                    table_data.push(values);
-                }
-
-                let cli_table = table_data.table();
-                print_stdout(cli_table).map_err(|e| e.to_string())?;
 
                 if used_index {
                     println!("(Optimization used: Primary Key Index Lookup)");
                 }
 
-                Ok(String::new())
+                Ok(QueryResult::Data(QueryResponse {
+                    columns: merged_columns.iter().map(|c| c.name.clone()).collect(),
+                    rows: final_rows.into_iter().map(|r| r.fields).collect(),
+                }))
             }
         }
     }

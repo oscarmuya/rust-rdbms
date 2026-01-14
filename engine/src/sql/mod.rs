@@ -1,5 +1,7 @@
 pub mod parser;
 
+use serde::Serialize;
+
 use crate::catalog::schema::Column;
 use crate::storage::record::{Field, Row};
 
@@ -15,8 +17,6 @@ pub enum Command {
     },
     Select {
         table_name: String,
-        // Later we will add:
-        // filters: Vec<Expression>,
         filter: Option<Filter>,
         join: Option<JoinClause>,
     },
@@ -55,4 +55,16 @@ pub struct JoinClause {
     pub left_column: String,
     pub right_table: String,
     pub right_column: String,
+}
+
+#[derive(Serialize)]
+pub struct QueryResponse {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<Field>>,
+}
+
+#[derive(Serialize)]
+pub enum QueryResult {
+    Message(String),     // For CREATE, INSERT, UPDATE, DELETE
+    Data(QueryResponse), // For SELECT and JOIN
 }

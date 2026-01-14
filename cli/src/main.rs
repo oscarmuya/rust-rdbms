@@ -1,4 +1,6 @@
+use cli_table::{Cell, Style, Table, print_stdout};
 use engine::engine::Database;
+use engine::sql::QueryResult;
 use engine::sql::parser::parse_sql;
 
 fn main() {
@@ -21,7 +23,7 @@ fn main() {
                         for cmd in commands {
                             // 2. Execute
                             match db.execute(cmd) {
-                                Ok(msg) => println!("{}", msg),
+                                Ok(msg) => print_result(msg),
                                 Err(e) => println!("Error: {}", e),
                             }
                         }
@@ -30,6 +32,35 @@ fn main() {
                 }
             }
             Err(_) => break,
+        }
+    }
+}
+
+fn print_result(result: QueryResult) {
+    match result {
+        QueryResult::Message(msg) => println!("{}", msg),
+        QueryResult::Data(resp) => {
+            // Build table rows
+            let table = resp
+                .rows
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|field| format!("{:?}", field).cell())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+                .table()
+                .title(
+                    resp.columns
+                        .iter()
+                        .map(|col| col.cell().bold(true))
+                        .collect::<Vec<_>>(),
+                );
+
+            if let Err(e) = print_stdout(table) {
+                eprintln!("Failed to print table: {}", e);
+            }
         }
     }
 }

@@ -4,6 +4,14 @@
 
 This project demonstrates the implementation of low-level database internals, moving from raw byte manipulation on disk to a high-level SQL interface.
 
+## Demonstration
+
+
+
+https://github.com/user-attachments/assets/2430f1ce-14d4-4e87-905a-e4e52002c3e3
+
+
+
 ## Key Features
 
 - **Custom Pager-Based Storage**: Manages data in 4KB pages to optimize disk I/O.
